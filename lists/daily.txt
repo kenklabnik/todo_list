@@ -1,0 +1,3 @@
+Sample Daily Item
+Secret, Second Item
+foobar
