@@ -2,9 +2,9 @@ use std::env;
 use std::fs; 
 use std::fs::File;
 use std::io;
-use std::io::{BufReader, Write, Read};
+use std::io::BufReader;
 use std::path::PathBuf;
-use std::fmt::Debug;
+//use std::fmt::Debug;
 
 use ::serde::{Serialize, Deserialize};
 
@@ -22,6 +22,7 @@ pub struct TodoUi {
     pub loaded_list: Option<TodoList>,
     pub all_lists: Vec<TodoList>,
     pub current_path: Option<PathBuf>,
+    pub input_text: String,
 }
 
 impl TodoUi {
@@ -81,7 +82,7 @@ impl eframe::App for TodoUi {
             }
         }
 
-        let mut top_panel = egui::TopBottomPanel::top("top_panel");
+        let top_panel = egui::TopBottomPanel::top("top_panel");
 
         top_panel
             .frame(self.top_panel_frame())
@@ -114,23 +115,31 @@ impl eframe::App for TodoUi {
                             None => &empty_path,
                         })
                         .pick_file() {
-                            self.current_path = Some(path);
+                            let load_result = TodoList::from_file(&path);
+                            match load_result {
+                                Ok(list) => {
+                                    self.loaded_list = Some(list);
+                                    self.current_path = Some(path);
+                                }
+                                Err(e) => {
+                                    panic!("Something panicked when attempting to load the list in RustyFileDialog");
+                                }
+                            };
                     }
-
                 }
 
                 if self.loaded_list.is_some() {
                     if ui.button("Save List").clicked() {
                         //TODO spin up new thread to handle this to reduce GUI lag
                         let empty_path = PathBuf::new();
-                        if let Some(mut path) = rfd::FileDialog::new()
+                        if let Some(path) = rfd::FileDialog::new()
                         .add_filter("json", &["json"])
                         .set_directory(match &self.current_path {
                             Some(p) => p,
                             None => &empty_path,
                         })
                         .save_file() {
-                            let mut saved_list = self.loaded_list.as_mut().unwrap();
+                            let saved_list = self.loaded_list.as_mut().unwrap();
                             saved_list.save(&path);
                             self.current_path = Some(path);
                         }
@@ -139,16 +148,34 @@ impl eframe::App for TodoUi {
             });
         });
 
+        //handling for popup that renames list
         let rename_list_popup = egui::Window::new("Rename List")
-            .collapsible(true)
+            //.collapsible(true)
             .title_bar(true)
-            .default_open(false)
-            .open(&mut false)
-            .show(&ctx, |ui| {
-                ui.label("Enter a new title here.");
-                ui.text_edit_singleline(&mut String::new());
+            .default_open(true);
+        if let Some(store) = frame.storage_mut() {
+            if let Some(rename_list_popup_status) = store.get_string("rename_list_popup_status") {
+                if rename_list_popup_status == String::from("open") {
+                    rename_list_popup.show(&ctx, |ui| {
+                        ui.label("Enter a new title here.");
+                        let new_title = egui::TextEdit::singleline(&mut self.input_text)
+                        .hint_text("New Title")
+                        .show(ui);
+                        
+                        ui.horizontal(|ui| {
+                            if ui.button("Set New Title").clicked() {
+                                self.loaded_list.as_mut().expect("loaded_list returned None").title = self.input_text.clone();
+                                store.set_string("rename_list_popup_status", String::from("closed"));
+                            }
+                            if ui.button("Cancel").clicked() {
+                                store.set_string("rename_list_popup_status", String::from("closed"));
+                            }
+                        });
 
-            });
+                    });
+                }
+            }
+        }
         
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -186,11 +213,12 @@ impl eframe::App for TodoUi {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     
                     let placeholder_list = TodoList::new(String::from("New Todo List"));
-                    ui.label("Under construction! Run with \"debug\" as an arg for egui information. Loaded list path: ");
+                    ui.label("Under construction! Run with \"debug\" as an arg for egui information.");
 
-                    ui.label(self.current_path.as_ref().expect("Problem unwrapping current_path in CentralPanel").display().to_string());
+                    //displays current_path; sometimes the path doesn't lead to a file, if that file was moved since last open. TODO?
+                    //ui.label(self.current_path.as_ref().unwrap_or(&PathBuf::new()).display().to_string());
 
-                    let mut loaded_list = match self.loaded_list.as_ref() {
+                    let loaded_list = match self.loaded_list.as_ref() {
                         Some(list) => list,
                         None => &placeholder_list,
                     };
@@ -198,7 +226,8 @@ impl eframe::App for TodoUi {
                     ui.horizontal(|ui| {
                         ui.heading(&loaded_list.title);
                         if ui.button("Change title").clicked() {
-                            //??
+                            self.input_text = String::from("");
+                            frame.storage_mut().expect("storage_mut returned None").set_string("rename_list_popup_status", String::from("open"));
                         }
                     });
                 })
