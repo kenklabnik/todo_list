@@ -7,11 +7,7 @@
 //notifications
 //multiple lists with different properties
 
-use std::env; 
-//use std::path::PathBuf;
 use todo_list::TodoUi;
-
-use eframe::egui; //eframe is a framework crate for egui
 
 fn main() -> eframe::Result<()> {
     env_logger::init(); //logs to stderr if run with `RUST_LOG=debug`

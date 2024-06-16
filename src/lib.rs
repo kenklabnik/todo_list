@@ -4,14 +4,12 @@ use std::fs::File;
 use std::io;
 use std::io::BufReader;
 use std::path::PathBuf;
-//use std::fmt::Debug;
 
 use ::serde::{Serialize, Deserialize};
 
 use chrono::*;
 
 use eframe::egui;
-use eframe::Storage;
 
 use rfd; // open/save dialogs
 
@@ -122,7 +120,7 @@ impl eframe::App for TodoUi {
                                     self.current_path = Some(path);
                                 }
                                 Err(e) => {
-                                    panic!("Something panicked when attempting to load the list in RustyFileDialog");
+                                    panic!("Something panicked when attempting to load the list through the UI:\n{e:?}");
                                 }
                             };
                     }
@@ -139,9 +137,16 @@ impl eframe::App for TodoUi {
                             None => &empty_path,
                         })
                         .save_file() {
-                            let saved_list = self.loaded_list.as_mut().unwrap();
-                            saved_list.save(&path);
-                            self.current_path = Some(path);
+                            let mut fallback_list = TodoList::new(String::from("Fallback list title (did something not get loaded?)"));
+                            let saved_list = self.loaded_list.as_mut().unwrap_or(&mut fallback_list);
+                            let _ = match saved_list.save(&path) {
+                                Ok(_) => {
+                                    self.current_path = Some(path);
+                                }
+                                Err(e) => {
+                                    panic!("Something panicked when attempting to save the list through the UI:\n{e:?}");
+                            }};
+
                         }
                     }
                 }
@@ -157,7 +162,7 @@ impl eframe::App for TodoUi {
                 if rename_list_popup_status == String::from("open") {
                     rename_list_popup.show(&ctx, |ui| {
                         ui.label("Enter a new title here.");
-                        let new_title = egui::TextEdit::singleline(&mut self.input_text)
+                        egui::TextEdit::singleline(&mut self.input_text)
                         .hint_text("New Title")
                         .show(ui);
                         
@@ -242,7 +247,6 @@ pub struct TodoList {
     pub title: String,
     pub items: Vec<TodoListItem>,
     date_created: DateTime<Local>,
-    //pub path: String,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -326,10 +330,10 @@ impl TodoListItem {
 mod tests {
     use super::*;
     use tempfile;
+    use std::io::{Read, Write};
 
     fn make_empty_list() -> TodoList {
-        let mut list = TodoList::new(String::from("test list"));
-        list
+        TodoList::new(String::from("test list"))
     }
 
     fn make_one_item_list() -> TodoList {
@@ -339,8 +343,7 @@ mod tests {
     }
 
     fn make_item_no_list() -> TodoListItem {
-        let item = TodoListItem::new(999, String::from("Test Item"), String::from("Test Description"));
-        item
+        TodoListItem::new(999, String::from("Test Item"), String::from("Test Description"))
     }
 
     #[test]
@@ -426,7 +429,7 @@ mod tests {
     fn loads_json_from_file() {
         let mut temp = tempfile::NamedTempFile::new().expect("loads_json_from_file() test panicked; temporary file creation failed.");
 
-        let mut contents = String::from("{\"title\":\"test list\",\"items\":\
+        let contents = String::from("{\"title\":\"test list\",\"items\":\
         [{\"id\":0,\"name\":\"Test Item\",\"description\":\"Test Description\",\"date_created\":\"2024-05-22T15:40:04.970459400-04:00\",\"completed\":false}],\
         \"date_created\":\"2024-05-22T15:40:04.969858100-04:00\"}");
 
