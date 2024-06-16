@@ -150,7 +150,6 @@ impl eframe::App for TodoUi {
 
         //handling for popup that renames list
         let rename_list_popup = egui::Window::new("Rename List")
-            //.collapsible(true)
             .title_bar(true)
             .default_open(true);
         if let Some(store) = frame.storage_mut() {
