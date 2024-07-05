@@ -21,6 +21,7 @@ pub struct TodoUi {
     pub all_lists: Vec<TodoList>,
     pub current_path: Option<PathBuf>,
     pub input_text: String,
+    pub input_text_2: String, //probably a cleaner way to do this
 }
 
 impl TodoUi {
@@ -180,6 +181,50 @@ impl eframe::App for TodoUi {
                 }
             }
         }
+
+        //TODO retest all of this after "Add Item" button implemented (really should've done that first)
+        //handling for popup that edits list items
+        let mut edit_list_item_popup = egui::Window::new("Edit Item")
+            .title_bar(true)
+            .default_open(true);
+        if let Some(store) = frame.storage_mut() {
+            if let Some(edit_item_popup_status) = store.get_string("edit_item_popup_status") {
+                if edit_item_popup_status == String::from("open") {
+
+                    //set title
+                    let mut loaded_list = self.loaded_list.as_mut().expect("loaded_list should not return None, as Edit Item button should not exist if no list is loaded");
+                    let id = store.get_string("edit_item_popup_target_id").expect("edit_item_popup_target_id was not found, should be set by Edit Item button in CentralPanel")
+                        .parse::<usize>().expect("failed to parse edit_item_popup_target_id from storage; should be set by Edit Item button in CentralPanel");
+                    let mut item = loaded_list.get_item_by_id(id).expect("edit_item_popup_target_id should match an actual id in loaded_list.items");
+                    let item_name = item.name.clone();
+                    edit_list_item_popup = edit_list_item_popup.id(Id::new("Editing \"{item_name}\"")); //id() apparently takes ownership if I don't assign like this
+
+                    edit_list_item_popup.show(&ctx, |ui| {
+                        //TODO item edit functionality
+                        ui.label("Enter a new item name here.");
+                        egui::TextEdit::singleline(&mut self.input_text)
+                        .hint_text("New Name")
+                        .show(ui);
+
+                        ui.label("Enter a new item description here.");
+                        egui::TextEdit::singleline(&mut self.input_text_2)
+                        .hint_text("New Description")
+                        .show(ui);
+
+                        ui.horizontal(|ui| {
+                            if ui.button("Set Changes").clicked() {
+                                loaded_list.change_item_name_by_id(self.input_text.clone(), id);
+                                loaded_list.change_item_desc_by_id(self.input_text_2.clone(), id);
+                                store.set_string("edit_item_popup_status", String::from("closed"));
+                            }
+                            if ui.button("Cancel").clicked() {
+                                store.set_string("edit_item_popup_status", String::from("closed"));
+                            }
+                        });
+                    });
+                }
+            }
+        }
         
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -216,15 +261,15 @@ impl eframe::App for TodoUi {
             } else {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     
-                    let placeholder_list = TodoList::new(String::from("New Todo List"));
+                    let mut placeholder_list = TodoList::new(String::from("New Todo List"));
                     ui.label("Under construction! Run with \"debug\" as an arg for egui information.");
 
                     //displays current_path; sometimes the path doesn't lead to a file, if that file was moved since last open. TODO?
                     //ui.label(self.current_path.as_ref().unwrap_or(&PathBuf::new()).display().to_string());
 
-                    let loaded_list = match self.loaded_list.as_ref() {
-                        Some(list) => list,
-                        None => &placeholder_list,
+                    let mut loaded_list = match self.loaded_list.as_mut() {
+                        Some(mut list) => list,
+                        None => &mut placeholder_list,
                     };
 
                     ui.horizontal(|ui| {
@@ -234,6 +279,30 @@ impl eframe::App for TodoUi {
                             frame.storage_mut().expect("storage_mut returned None").set_string("rename_list_popup_status", String::from("open"));
                         }
                     });
+
+                    //List items
+                    for list_item in &mut loaded_list.items {
+                        ui.horizontal(|ui| {
+                            ui.label(&list_item.name);
+
+                            ui.checkbox(&mut list_item.completed, "Complete");
+                        });
+                        ui.heading(&list_item.description);
+                        ui.horizontal(|ui| {
+                            if ui.button("Edit").clicked() {
+                                //TODO implement popup for item editing
+                                self.input_text = String::from("");
+                                frame.storage_mut().expect("storage_mut returned None").set_string("edit_item_popup_status", String::from("open"));
+                                frame.storage_mut().expect("storage_mut returned None").set_string("edit_item_popup_target_id", list_item.id().to_string());
+                            }
+                            if ui.button("Delete").clicked() {
+                                //TODO implement popup for item deletion; "Are you sure?"
+                                //self.input_text = String::from("");
+                                //frame.storage_mut().expect("storage_mut returned None").set_string("delete_item_popup_status", String::from("open"));
+                                //frame.storage_mut().expect("storage_mut returned None").set_string("delete_item_popup_target_id", list_item.id().to_string());
+                            }
+                        });
+                    }
                 })
             }
         });
@@ -255,7 +324,7 @@ pub struct TodoListItem {
     pub name: String,
     pub description: String,
     date_created: DateTime<Local>,
-    completed: bool,
+    pub completed: bool,
 }
 
 impl TodoList {
@@ -283,11 +352,37 @@ impl TodoList {
         self.items = Vec::new();
     }
 
-    pub fn remove_item(&mut self, id: usize) {
-        //TODO gracefully handle situations where multiple items may have the same id
-        //this could happen due to bugs or due to manually editing the saved list files
-        //for now, just removes the first such instance found
+    //TODO gracefully handle situations where multiple items may have the same id, for methods that take it
+    //this could happen due to bugs or due to manually editing the saved list files
 
+    fn get_item_by_id(&mut self, id: usize) -> Option<&TodoListItem> {
+        for i in 0..self.items.len() {
+            if self.items[i].id == id {
+                return Some(&self.items[i]);
+            }
+        }
+        None
+    }
+
+    fn change_item_name_by_id(&mut self, name: String, id: usize) {
+        for i in 0..self.items.len() {
+            if self.items[i].id == id {
+                self.items[i].name = name;
+                break;
+            }
+        }
+    }
+
+    fn change_item_desc_by_id(&mut self, desc: String, id: usize) {
+        for i in 0..self.items.len() {
+            if self.items[i].id == id {
+                self.items[i].description = desc;
+                break;
+            }
+        }
+    }
+
+    pub fn remove_item(&mut self, id: usize) {
         for i in 0..self.items.len() {
             if self.items[i].id == id {
                 self.items.remove(i);
@@ -324,6 +419,7 @@ impl TodoListItem {
     pub fn id(&self) -> usize {
         self.id
     }
+
 }
 
 #[cfg(test)]
