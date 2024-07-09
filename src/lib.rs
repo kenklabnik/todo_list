@@ -4,24 +4,24 @@ use std::fs::File;
 use std::io;
 use std::io::BufReader;
 use std::path::PathBuf;
+use std::collections::HashMap;
 
 use ::serde::{Serialize, Deserialize};
 
 use chrono::*;
 
+use egui::*;
 use eframe::egui;
 
-use rfd; // open/save dialogs
+use rfd; //RustyFileDialog
 
-use egui::*;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct TodoUi {
     pub loaded_list: Option<TodoList>,
     pub all_lists: Vec<TodoList>,
     pub current_path: Option<PathBuf>,
-    pub input_text: String,
-    pub input_text_2: String, //probably a cleaner way to do this
+    pub text_inputs: HashMap<String, String>, //maybe I can roll this into the general storage?
 }
 
 impl TodoUi {
@@ -104,7 +104,7 @@ impl eframe::App for TodoUi {
                     self.loaded_list = Some(TodoList::new(String::from("New Todo List")));
                 }
 
-                if ui.button("Load List").clicked() {
+                if ui.button("Load List From File").clicked() {
                     //TODO implement check if current list is saved
                     let empty_path = PathBuf::new();
                     if let Some(path) = rfd::FileDialog::new()
@@ -128,8 +128,7 @@ impl eframe::App for TodoUi {
                 }
 
                 if self.loaded_list.is_some() {
-                    if ui.button("Save List").clicked() {
-                        //TODO spin up new thread to handle this to reduce GUI lag
+                    if ui.button("Save List To File").clicked() {
                         let empty_path = PathBuf::new();
                         if let Some(path) = rfd::FileDialog::new()
                         .add_filter("json", &["json"])
@@ -163,13 +162,14 @@ impl eframe::App for TodoUi {
                 if rename_list_popup_status == String::from("open") {
                     rename_list_popup.show(&ctx, |ui| {
                         ui.label("Enter a new title here.");
-                        egui::TextEdit::singleline(&mut self.input_text)
+                        egui::TextEdit::singleline(self.text_inputs.get_mut(&String::from("list_title"))
+                            .expect("list_title should be properly initialized when Rename List is clicked"))
                         .hint_text("New Title")
                         .show(ui);
                         
                         ui.horizontal(|ui| {
                             if ui.button("Set New Title").clicked() {
-                                self.loaded_list.as_mut().expect("loaded_list returned None").title = self.input_text.clone();
+                                self.loaded_list.as_mut().expect("loaded_list returned None").title = self.text_inputs.get("list_title").unwrap().clone();
                                 store.set_string("rename_list_popup_status", String::from("closed"));
                             }
                             if ui.button("Cancel").clicked() {
@@ -182,7 +182,45 @@ impl eframe::App for TodoUi {
             }
         }
 
-        //TODO retest all of this after "Add Item" button implemented (really should've done that first)
+        //handling for popup to add list item
+        let mut add_item_popup = egui::Window::new("Add Item")
+            .title_bar(true)
+            .default_open(true);
+        if let Some(store) = frame.storage_mut() {
+            if let Some(add_item_popup_status) = store.get_string("add_item_popup_status") {
+                if add_item_popup_status == String::from("open") {
+                    add_item_popup.show(&ctx, |ui| {
+
+                        ui.label("Give your new list item a name here.");
+                        egui::TextEdit::singleline(self.text_inputs.get_mut(&String::from("item_name"))
+                            .expect("item_name should be properly initialized before Add Item is clicked"))
+                        .hint_text("New Item Name")
+                        .show(ui);
+
+                        ui.label("Describe the item in more detail here.");
+                        egui::TextEdit::singleline(self.text_inputs.get_mut(&String::from("item_description"))
+                            .expect("item_description should be properly initialized before Add Item is clicked"))
+                        .hint_text("New Item Description")
+                        .show(ui);
+
+                        ui.horizontal(|ui| {
+                            if ui.button("Add Item").clicked() {
+                                self.loaded_list.as_mut().expect("loaded_list returned None").add(
+                                    self.text_inputs.get("item_name").unwrap().clone(), 
+                                    self.text_inputs.get("item_description").unwrap().clone()
+                                );
+                                store.set_string("add_item_popup_status", String::from("closed"));
+                            }
+                            if ui.button("Cancel").clicked() {
+                                store.set_string("add_item_popup_status", String::from("closed"));
+                            }
+                        });
+
+                    });
+                }
+            }
+        }
+
         //handling for popup that edits list items
         let mut edit_list_item_popup = egui::Window::new("Edit Item")
             .title_bar(true)
@@ -190,8 +228,6 @@ impl eframe::App for TodoUi {
         if let Some(store) = frame.storage_mut() {
             if let Some(edit_item_popup_status) = store.get_string("edit_item_popup_status") {
                 if edit_item_popup_status == String::from("open") {
-
-                    //set title
                     let mut loaded_list = self.loaded_list.as_mut().expect("loaded_list should not return None, as Edit Item button should not exist if no list is loaded");
                     let id = store.get_string("edit_item_popup_target_id").expect("edit_item_popup_target_id was not found, should be set by Edit Item button in CentralPanel")
                         .parse::<usize>().expect("failed to parse edit_item_popup_target_id from storage; should be set by Edit Item button in CentralPanel");
@@ -200,21 +236,22 @@ impl eframe::App for TodoUi {
                     edit_list_item_popup = edit_list_item_popup.id(Id::new("Editing \"{item_name}\"")); //id() apparently takes ownership if I don't assign like this
 
                     edit_list_item_popup.show(&ctx, |ui| {
-                        //TODO item edit functionality
                         ui.label("Enter a new item name here.");
-                        egui::TextEdit::singleline(&mut self.input_text)
+                        egui::TextEdit::singleline(self.text_inputs.get_mut(&String::from("item_name"))
+                            .expect("item_name should be properly initialized before Edit Item is clicked"))
                         .hint_text("New Name")
                         .show(ui);
 
                         ui.label("Enter a new item description here.");
-                        egui::TextEdit::singleline(&mut self.input_text_2)
+                        egui::TextEdit::singleline(self.text_inputs.get_mut(&String::from("item_description"))
+                            .expect("item_description should be properly initialized before Edit Item is clicked"))
                         .hint_text("New Description")
                         .show(ui);
 
                         ui.horizontal(|ui| {
                             if ui.button("Set Changes").clicked() {
-                                loaded_list.change_item_name_by_id(self.input_text.clone(), id);
-                                loaded_list.change_item_desc_by_id(self.input_text_2.clone(), id);
+                                loaded_list.change_item_name_by_id(self.text_inputs.get("item_name").unwrap().clone(), id);
+                                loaded_list.change_item_desc_by_id(self.text_inputs.get("item_description").unwrap().clone(), id);
                                 store.set_string("edit_item_popup_status", String::from("closed"));
                             }
                             if ui.button("Cancel").clicked() {
@@ -264,9 +301,6 @@ impl eframe::App for TodoUi {
                     let mut placeholder_list = TodoList::new(String::from("New Todo List"));
                     ui.label("Under construction! Run with \"debug\" as an arg for egui information.");
 
-                    //displays current_path; sometimes the path doesn't lead to a file, if that file was moved since last open. TODO?
-                    //ui.label(self.current_path.as_ref().unwrap_or(&PathBuf::new()).display().to_string());
-
                     let mut loaded_list = match self.loaded_list.as_mut() {
                         Some(mut list) => list,
                         None => &mut placeholder_list,
@@ -275,33 +309,41 @@ impl eframe::App for TodoUi {
                     ui.horizontal(|ui| {
                         ui.heading(&loaded_list.title);
                         if ui.button("Change title").clicked() {
-                            self.input_text = String::from("");
+                            let _ = self.text_inputs.insert(String::from("list_title"), loaded_list.title.clone());
                             frame.storage_mut().expect("storage_mut returned None").set_string("rename_list_popup_status", String::from("open"));
                         }
                     });
 
-                    //List items
+                    if ui.button("Add item").clicked() {
+                            frame.storage_mut().expect("storage_mut returned None").set_string("add_item_popup_status", String::from("open"));
+                    }
+
+                    //workaround for ownership issue with item deletion
+                    let mut id_to_delete = usize::MAX;
+
                     for list_item in &mut loaded_list.items {
                         ui.horizontal(|ui| {
-                            ui.label(&list_item.name);
-
                             ui.checkbox(&mut list_item.completed, "Complete");
+                            ui.label(&list_item.name);
                         });
-                        ui.heading(&list_item.description);
+                        ui.label(&list_item.description);
                         ui.horizontal(|ui| {
                             if ui.button("Edit").clicked() {
-                                //TODO implement popup for item editing
-                                self.input_text = String::from("");
+                                self.text_inputs.insert(String::from("item_name"), String::from(&list_item.name.clone()));
+                                self.text_inputs.insert(String::from("item_description"), String::from(&list_item.description.clone()));
                                 frame.storage_mut().expect("storage_mut returned None").set_string("edit_item_popup_status", String::from("open"));
                                 frame.storage_mut().expect("storage_mut returned None").set_string("edit_item_popup_target_id", list_item.id().to_string());
                             }
                             if ui.button("Delete").clicked() {
                                 //TODO implement popup for item deletion; "Are you sure?"
-                                //self.input_text = String::from("");
-                                //frame.storage_mut().expect("storage_mut returned None").set_string("delete_item_popup_status", String::from("open"));
-                                //frame.storage_mut().expect("storage_mut returned None").set_string("delete_item_popup_target_id", list_item.id().to_string());
+                                id_to_delete = list_item.id;
                             }
                         });
+                    }
+
+                    if id_to_delete < usize::MAX {
+                        loaded_list.remove_item(id_to_delete);
+                        id_to_delete = usize::MAX;
                     }
                 })
             }
